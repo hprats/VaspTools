@@ -7,6 +7,7 @@ from ase.io import write
 from pymatgen.io.ase import AseAtomsAdaptor
 from .user_data import PP_PATH
 from .valid_incar_tags import VALID_INCAR_TAGS
+from .vasp_recommended_pp import VASP_RECOMMENDED_PP
 
 
 def write_potcar(job_path, poscar_elements, pp_dict, pp_path):
@@ -68,13 +69,14 @@ class StructureOptimization:
     incartags : dict
         Dictionary of INCAR tags, e.g. {'ISIF': 3, 'IBRION': 2, ...}.
     kspacing : float, optional
-        The smallest allowed k-point spacing in Å^-1. Default is 0.5.
+        The smallest allowed k-point spacing in Å^-1. Default is 1.0.
+        Recommended: 0.66 for bulk optimization, 1.0 for the rest.
     kpointstype : str, optional
         Either 'gamma' (Gamma-centered) or 'mp' (Monkhorst-Pack). Default is 'gamma'.
     potcar_dict : dict, optional
-        Dictionary mapping element symbol -> POTCAR subfolder name. Default is an empty dict.
+        Dictionary mapping element symbol -> POTCAR subfolder name. Default is VASP recommended PP.
     periodicity : str, optional
-        '2d' (slab) or '3d' (bulk). Default is '3d'.
+        '2d' (slab) or '3d' (bulk). Default is '2d'.
 
     Examples
     --------
@@ -89,10 +91,10 @@ class StructureOptimization:
         self,
         atoms,
         incartags,
-        kspacing=0.5,
+        kspacing=1.0,
         kpointstype='gamma',
-        potcar_dict=None,
-        periodicity='3d',
+        potcar_dict=VASP_RECOMMENDED_PP,
+        periodicity='2d',
     ):
         self.atoms = atoms
         self.incartags = incartags
@@ -118,23 +120,11 @@ class StructureOptimization:
         ----------
         folder_name : str, optional
             The directory in which to write the files. Default is 'bulk'.
-
-        Returns
-        -------
-        None
         """
         os.makedirs(folder_name, exist_ok=True)
-
-        # 1) Write POSCAR
         self._write_poscar(folder_name)
-
-        # 2) Write INCAR
         self._write_incar(folder_name)
-
-        # 3) Write KPOINTS
         self._write_kpoints(folder_name)
-
-        # 4) Write POTCAR
         self._write_potcar(folder_name)
 
     def _write_poscar(self, folder_name):
@@ -145,13 +135,8 @@ class StructureOptimization:
         ----------
         folder_name : str
             The directory in which to write the POSCAR.
-
-        Returns
-        -------
-        None
         """
         poscar_path = os.path.join(folder_name, "POSCAR")
-        # Use ASE’s vasp writer with direct (fractional) coordinates:
         write(poscar_path, self.atoms, format="vasp", direct=True, vasp5=True)
 
     def _write_incar(self, folder_name):
@@ -162,10 +147,6 @@ class StructureOptimization:
         ----------
         folder_name : str
             The directory in which to write the INCAR.
-
-        Returns
-        -------
-        None
         """
         incar_path = os.path.join(folder_name, "INCAR")
         with open(incar_path, "w") as f:
@@ -186,10 +167,6 @@ class StructureOptimization:
         ----------
         folder_name : str
             The directory in which to write the KPOINTS file.
-
-        Returns
-        -------
-        None
         """
         structure = AseAtomsAdaptor().get_structure(self.atoms)
         recip = structure.lattice.reciprocal_lattice  # in Å^-1
@@ -233,10 +210,6 @@ class StructureOptimization:
         ----------
         folder_name : str
             The directory in which to write the POTCAR.
-
-        Returns
-        -------
-        None
         """
         symbols = self.atoms.get_chemical_symbols()  # e.g. ['Al', 'W', 'C', ...]
         write_potcar(
@@ -250,14 +223,9 @@ class StructureOptimization:
         """
         Verify that all user-specified INCAR tags are recognized VASP tags.
         Warn if any unrecognized tags are found.
-
-        Raises
-        ------
-        Warning
-            If any INCAR tag is not in VALID_INCAR_TAGS.
         """
         user_keys = set(self.incartags.keys())
-        invalid_keys = user_keys - VALID_INCAR_TAGS
+        invalid_keys = user_keys - set(VALID_INCAR_TAGS)
         if invalid_keys:
             warnings.warn(
                 f"The following INCAR tags are not recognized as standard VASP tags: {invalid_keys}",
@@ -269,23 +237,16 @@ class StructureOptimization:
         Check that `ISIF` is consistent with the specified periodicity.
         For 3D, ISIF should be 3.
         For 2D, ISIF should be 0 (or omitted).
-
-        Raises
-        ------
-        Warning
-            If the recommended ISIF setting is not used.
         """
         isif_value = self.incartags.get('ISIF', None)
 
         if self.periodicity == '3d':
-            # For 3D, we recommend ISIF=3
             if isif_value != 3:
                 warnings.warn(
                     f"Recommended ISIF=3 for 3D periodicity, but got ISIF={isif_value}.",
                     UserWarning
                 )
         elif self.periodicity == '2d':
-            # For 2D, we recommend ISIF=0 or no ISIF at all
             if isif_value is not None and isif_value != 0:
                 warnings.warn(
                     f"Recommended ISIF=0 or omit it for 2D periodicity, but got ISIF={isif_value}.",
