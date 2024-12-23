@@ -2,7 +2,7 @@ import os
 import numpy as np
 
 from math import pi
-from ase.io.vasp import write_vasp
+from ase.io import write
 from pymatgen.io.ase import AseAtomsAdaptor
 
 from .user_data import PP_PATH
@@ -93,7 +93,7 @@ class BulkOptimization:
         """
         poscar_path = os.path.join(folder_name, "POSCAR")
         # If you prefer direct coordinates:
-        write_vasp(filename=poscar_path, atoms=self.atoms, direct=True, vasp5=True)
+        write(poscar_path, self.atoms, format="vasp", direct=True, vasp5=True)
 
     def _write_incar(self, folder_name):
         """
@@ -136,11 +136,11 @@ class BulkOptimization:
         shift_line = "0 0 0" if self.kpointstype == 'gamma' else "0.5 0.5 0.5"
 
         kpoints_content = f"""KPOINTS
-0
-{kpts_style}
-{n1} {n2} {n3}
-{shift_line}
-"""
+        0
+        {kpts_style}
+        {n1} {n2} {n3}
+        {shift_line}
+        """
 
         kpoints_path = os.path.join(folder_name, "KPOINTS")
         with open(kpoints_path, "w") as f:
