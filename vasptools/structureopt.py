@@ -66,7 +66,7 @@ class StructureOptimization:
     ----------
     atoms : ase.atoms.Atoms
         The ASE Atoms object describing the structure.
-    incartags : dict
+    incar_tags : dict
         Dictionary of INCAR tags, e.g. {'ISIF': 3, 'IBRION': 2, ...}.
     kspacing : float, optional
         The smallest allowed k-point spacing in Å^-1. Default is 1.0.
@@ -82,22 +82,22 @@ class StructureOptimization:
     --------
     >>> from ase.build import bulk
     >>> atoms = bulk('Si')
-    >>> incartags = {'ISIF': 3, 'IBRION': 2, 'ENCUT': 520}
-    >>> job = StructureOptimization(atoms, incartags, 0.5, 'gamma', {}, '3d')
+    >>> incar_tags = {'ISIF': 3, 'IBRION': 2, 'ENCUT': 520}
+    >>> job = StructureOptimization(atoms, incar_tags, 0.5, 'gamma', {}, '3d')
     >>> job.write_input_files(folder_name='test_si_opt')
     """
 
     def __init__(
         self,
         atoms,
-        incartags,
+        incar_tags,
         kspacing=1.0,
         kpointstype='gamma',
         potcar_dict=VASP_RECOMMENDED_PP,
         periodicity='2d',
     ):
         self.atoms = atoms
-        self.incartags = incartags
+        self.incar_tags = incar_tags
         self.kspacing = float(kspacing)
         self.kpointstype = kpointstype.lower()
         self.periodicity = periodicity.lower()
@@ -141,7 +141,7 @@ class StructureOptimization:
 
     def _write_incar(self, folder_name):
         """
-        Write the INCAR file based on the incartags dictionary.
+        Write the INCAR file based on the incar_tags dictionary.
 
         Parameters
         ----------
@@ -150,7 +150,7 @@ class StructureOptimization:
         """
         incar_path = os.path.join(folder_name, "INCAR")
         with open(incar_path, "w") as f:
-            for tag_key, tag_val in self.incartags.items():
+            for tag_key, tag_val in self.incar_tags.items():
                 f.write(f"{tag_key} = {tag_val}\n")
 
     def _write_kpoints(self, folder_name):
@@ -224,7 +224,7 @@ class StructureOptimization:
         Verify that all user-specified INCAR tags are recognized VASP tags.
         Warn if any unrecognized tags are found.
         """
-        user_keys = set(self.incartags.keys())
+        user_keys = set(self.incar_tags.keys())
         invalid_keys = user_keys - set(VALID_INCAR_TAGS)
         if invalid_keys:
             warnings.warn(
@@ -238,7 +238,7 @@ class StructureOptimization:
         For 3D, ISIF should be 3.
         For 2D, ISIF should be 0 (or omitted).
         """
-        isif_value = self.incartags.get('ISIF', None)
+        isif_value = self.incar_tags.get('ISIF', None)
 
         if self.periodicity == '3d':
             if isif_value != 3:
