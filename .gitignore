@@ -5,6 +5,10 @@
 .idea/
 .idea/**
 
+# Always ignore vasptools.egg-info directory
+vasptools.egg-info/
+vasptools.egg-info/**
+
 # Do NOT ignore the .gitignore file itself
 !.gitignore
 
