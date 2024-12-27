@@ -1,9 +1,15 @@
+# Ignore everything
 *
+
+# Always ignore .idea directory
+.idea/
+.idea/**
+
+# Do NOT ignore the .gitignore file itself
 !.gitignore
 
-# Exclude the .idea folder
-.idea/
+# Unignore directories so that Git can see inside them
+!*/
 
-# Keep the vasptools folder
-!vasptools/
-!vasptools/*.py
+# Unignore all .py files recursively
+!**/*.py
