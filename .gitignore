@@ -1,20 +1,22 @@
-# Ignore everything
+# 1) Ignore everything by default
 *
 
-# Always ignore .idea directory
+# 2) Do not ignore the .gitignore file itself
+!.gitignore
+
+# 3) Always ignore .idea
 .idea/
 .idea/**
 
-# Always ignore vasptools.egg-info directory
+# 4) Always ignore vasptools.egg-info
 vasptools.egg-info/
 vasptools.egg-info/**
 
-# Do NOT ignore the .gitignore file itself
-!.gitignore
+# 5) Unignore the vasptools directory so we can selectively include files inside it
+!vasptools/
+!vasptools/**/
 
-# Unignore directories so that Git can see inside them
-!*/
-
-# Unignore all .py files recursively
-!**/*.py
-!**/*.txt
+# 6) Ignore everything in vasptools again, then unignore *.py and *.txt
+vasptools/*
+!vasptools/**/*.py
+!vasptools/**/*.txt
