@@ -6,8 +6,15 @@ from math import pi
 from ase.io import write
 from pymatgen.io.ase import AseAtomsAdaptor
 from .user_data import PP_PATH
-from .valid_incar_tags import VALID_INCAR_TAGS
 from .vasp_recommended_pp import VASP_RECOMMENDED_PP
+
+# Load valid INCAR tags from valid_incar_tags.txt
+this_dir = os.path.dirname(__file__)
+valid_incar_file = os.path.join(this_dir, 'valid_incar_tags.txt')
+
+with open(valid_incar_file, 'r') as f:
+    lines = [ln.strip() for ln in f if ln.strip()]
+VALID_INCAR_TAGS = set(lines)
 
 
 def write_potcar(job_path, poscar_elements, pp_dict, pp_path):
