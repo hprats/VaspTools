@@ -13,3 +13,4 @@
 
 # Unignore all .py files recursively
 !**/*.py
+!**/*.txt
