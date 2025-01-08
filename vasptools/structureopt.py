@@ -197,10 +197,10 @@ class StructureOptimization:
         # Non-periodic case: single k-point
         if self.periodicity is None:
             content = """KPOINTS
-1
+0
 Gamma
+1 1 1
 0 0 0
-1
 """
             with open(kpoints_path, "w") as f:
                 f.write(content)
