@@ -196,11 +196,11 @@ class StructureOptimization:
 
         # Non-periodic case: single k-point
         if self.periodicity is None:
-            content = """KPOINTS
-0
-Gamma
-1 1 1
-0 0 0
+            content = """Gamma-point only
+ 0
+Monkhorst Pack
+ 1 1 1
+ 0 0 0
 """
             with open(kpoints_path, "w") as f:
                 f.write(content)
