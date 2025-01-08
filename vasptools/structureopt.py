@@ -67,7 +67,8 @@ def write_potcar(job_path, poscar_elements, pp_dict, pp_path):
 
 class StructureOptimization:
     """
-    Prepare input files (INCAR, KPOINTS, POSCAR, POTCAR) for VASP structure optimization.
+    Prepare input files (INCAR, KPOINTS, POSCAR, POTCAR) for VASP structure optimization
+    or other calculations (e.g., gas-phase molecules).
 
     Parameters
     ----------
@@ -78,12 +79,15 @@ class StructureOptimization:
     kspacing : float, optional
         The smallest allowed k-point spacing in Å^-1. Default is 1.0.
         Recommended: 0.66 for bulk optimization, 1.0 for the rest.
+        This should not be provided if `periodicity=None`.
     kpointstype : str, optional
         Either 'gamma' (Gamma-centered) or 'mp' (Monkhorst-Pack). Default is 'gamma'.
+        This should not be provided if `periodicity=None`.
     potcar_dict : dict, optional
         Dictionary mapping element symbol -> POTCAR subfolder name. Default is VASP recommended PP.
-    periodicity : str, optional
-        '2d' (slab) or '3d' (bulk). Default is '2d'.
+    periodicity : str or None, optional
+        '2d' (slab), '3d' (bulk), or None for non-periodic (gas-phase) calculations.
+        Default is '2d'.
 
     Examples
     --------
@@ -105,9 +109,18 @@ class StructureOptimization:
     ):
         self.atoms = atoms
         self.incar_tags = incar_tags
-        self.kspacing = float(kspacing)
-        self.kpointstype = kpointstype.lower()
-        self.periodicity = periodicity.lower()
+        self.periodicity = periodicity
+
+        if self.periodicity is None:
+            if kspacing != 1.0 or kpointstype != 'gamma':
+                raise ValueError(
+                    "For periodicity=None (gas-phase), do not provide kspacing or kpointstype."
+                )
+            self.kspacing = None
+            self.kpointstype = None
+        else:
+            self.kspacing = float(kspacing)
+            self.kpointstype = kpointstype.lower()
 
         if potcar_dict is None:
             potcar_dict = {}
@@ -170,19 +183,30 @@ class StructureOptimization:
 
     def _write_kpoints(self, folder_name):
         """
-        Compute the KPOINTS mesh from the user-specified kspacing and type.
-
-        For an orthorhombic cell with lengths a, b, c,
-        Ni = max(1, int(Rk * |b_i| + 0.5)) where Rk = 2π / kspacing,
-        and |b_i| are the reciprocal lattice vector lengths.
-
-        If periodicity='2d', the number of kpoints in the z direction is fixed to 1.
+        Write the KPOINTS file. If periodicity is None (gas-phase),
+        write a single k-point (Gamma only). Otherwise, compute
+        the k-point mesh from user-specified kspacing and type.
 
         Parameters
         ----------
         folder_name : str
             The directory in which to write the KPOINTS file.
         """
+        kpoints_path = os.path.join(folder_name, "KPOINTS")
+
+        # Non-periodic case: single k-point
+        if self.periodicity is None:
+            content = """KPOINTS
+1
+Gamma
+0 0 0
+1
+"""
+            with open(kpoints_path, "w") as f:
+                f.write(content)
+            return
+
+        # Periodic case: 2D or 3D
         structure = AseAtomsAdaptor().get_structure(self.atoms)
         recip = structure.lattice.reciprocal_lattice  # in Å^-1
         b1, b2, b3 = recip.matrix
@@ -212,7 +236,6 @@ class StructureOptimization:
 {shift_line}
 """
 
-        kpoints_path = os.path.join(folder_name, "KPOINTS")
         with open(kpoints_path, "w") as f:
             f.write(kpoints_content)
 
@@ -252,6 +275,7 @@ class StructureOptimization:
         Check that `ISIF` is consistent with the specified periodicity.
         For 3D, ISIF should be 3.
         For 2D, ISIF should be 0 (or omitted).
+        If periodicity=None (gas-phase), we do not impose any specific ISIF.
         """
         isif_value = self.incar_tags.get('ISIF', None)
 
@@ -267,8 +291,11 @@ class StructureOptimization:
                     f"Recommended ISIF=0 or omit it for 2D periodicity, but got ISIF={isif_value}.",
                     UserWarning
                 )
+        elif self.periodicity is None:
+            # Gas-phase: no restrictions on ISIF.
+            return
         else:
             warnings.warn(
-                f"Unknown periodicity '{self.periodicity}'. Expected '2d' or '3d'.",
+                f"Unknown periodicity '{self.periodicity}'. Expected '2d', '3d', or None.",
                 UserWarning
             )
