@@ -1,10 +1,21 @@
+import os
+
+
 def get_energy_oszicar(job_path):
-    energy = None
-    with open(f"{job_path}/OSZICAR") as infile:
+    """
+    Reads the final total energy from the OSZICAR file in job_path.
+    Raises FileNotFoundError if the OSZICAR file does not exist.
+    """
+    oszicar_file = os.path.join(job_path, "OSZICAR")
+    if not os.path.isfile(oszicar_file):
+        raise FileNotFoundError(f"OSZICAR file not found in {job_path}")
+
+    with open(oszicar_file, 'r') as infile:
         lines = infile.readlines()
-    final = len(lines) - 1
-    for i in range(final, 0, -1):
-        if ' F= ' in lines[i]:
-            energy = float(lines[i].split()[4])
-            break
-    return energy
+
+    for line in reversed(lines):
+        if ' F= ' in line:
+            energy = float(line.split()[4])
+            return energy
+
+    return None
