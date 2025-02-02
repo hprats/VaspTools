@@ -8,7 +8,7 @@ from pymatgen.io.ase import AseAtomsAdaptor
 from .user_data import PP_PATH
 from .vasp_recommended_pp import VASP_RECOMMENDED_PP
 
-# Load valid INCAR tags from valid_incar_tags.txt
+# Load valid INCAR tags from valid_incar_tags.txt file
 this_dir = os.path.dirname(__file__)
 valid_incar_file = os.path.join(this_dir, 'valid_incar_tags.txt')
 
