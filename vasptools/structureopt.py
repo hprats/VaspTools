@@ -76,6 +76,10 @@ class StructureOptimization:
         The ASE Atoms object describing the structure.
     incar_tags : dict
         Dictionary of INCAR tags, e.g. {'ISIF': 3, 'IBRION': 2, ...}.
+    magmom : dict, optional
+        Dictionary mapping element symbols to initial magnetic moments.
+        For elements not included, a default of 0.0 is assumed.
+        The resulting MAGMOM tag is added to the INCAR file if at least one value is non-zero.
     kspacing : float, optional
         The smallest allowed k-point spacing in Å^-1. Default is 1.0.
         Recommended: 0.66 for bulk optimization, 1.0 for the rest.
@@ -94,7 +98,8 @@ class StructureOptimization:
     >>> from ase.build import bulk
     >>> atoms = bulk('Si')
     >>> incar_tags = {'ISIF': 3, 'IBRION': 2, 'ENCUT': 520}
-    >>> job = StructureOptimization(atoms, incar_tags, 0.5, 'gamma', {}, '3d')
+    >>> magmom = {'Co': 1.67}
+    >>> job = StructureOptimization(atoms, incar_tags, magmom, 0.5, 'gamma', {}, '3d')
     >>> job.write_input_files(folder_name='test_si_opt')
     """
 
@@ -102,6 +107,7 @@ class StructureOptimization:
         self,
         atoms,
         incar_tags,
+        magmom=None,
         kspacing=1.0,
         kpointstype='gamma',
         potcar_dict=VASP_RECOMMENDED_PP,
@@ -110,6 +116,7 @@ class StructureOptimization:
         self.atoms = atoms
         self.incar_tags = incar_tags
         self.periodicity = periodicity
+        self.magmom = magmom if magmom is not None else {}
 
         if self.periodicity is None:
             if kspacing != 1.0 or kpointstype != 'gamma':
@@ -169,7 +176,7 @@ class StructureOptimization:
 
     def _write_incar(self, folder_name):
         """
-        Write the INCAR file based on the incar_tags dictionary.
+        Write the INCAR file based on the incar_tags dictionary and include MAGMOM tag if applicable.
 
         Parameters
         ----------
@@ -180,6 +187,48 @@ class StructureOptimization:
         with open(incar_path, "w") as f:
             for tag_key, tag_val in self.incar_tags.items():
                 f.write(f"{tag_key} = {tag_val}\n")
+            magmom_str = self._generate_magmom_string()
+            if magmom_str:
+                f.write(f"MAGMOM = {magmom_str}\n")
+
+    def _generate_magmom_string(self):
+        """
+        Generate the MAGMOM string based on the atoms' ordering and the magmom dictionary.
+        Elements not specified in the dictionary are assigned a default value of 0.0.
+        Returns an empty string if all magmom values are zero.
+        """
+        symbols = self.atoms.get_chemical_symbols()
+        if not symbols:
+            return ""
+
+        # Build unique element list and their counts.
+        # This assumes that the atoms are grouped by element as in the POSCAR.
+        unique_elements = []
+        counts = []
+        current_element = symbols[0]
+        count = 1
+        for sym in symbols[1:]:
+            if sym == current_element:
+                count += 1
+            else:
+                unique_elements.append(current_element)
+                counts.append(count)
+                current_element = sym
+                count = 1
+        unique_elements.append(current_element)
+        counts.append(count)
+
+        magmom_entries = []
+        all_zero = True
+        for elem, cnt in zip(unique_elements, counts):
+            # Use provided magmom value or default to 0.0.
+            mag = self.magmom.get(elem, 0.0)
+            if mag != 0.0:
+                all_zero = False
+            magmom_entries.append(f"{cnt}*{mag}")
+        if all_zero:
+            return ""
+        return " ".join(magmom_entries)
 
     def _write_kpoints(self, folder_name):
         """
