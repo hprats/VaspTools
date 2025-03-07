@@ -15,3 +15,4 @@ VASP_RECOMMENDED_PP = {
     # f block
     'Ce': 'Ce'
 }
+
