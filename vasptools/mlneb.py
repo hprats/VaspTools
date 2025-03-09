@@ -42,6 +42,8 @@ Usage example:
     initial = read(f"{main_path}/ts/{elementary_step}/initial/CONTCAR")
     final = read(f"{main_path}/ts/{elementary_step}/final/CONTCAR")
 
+    magmom_dict = {'Co': 1.67, 'Pt': 0.0, 'C': 0.0, 'O': 0.0}
+
     job = MLNEB(
         atoms_initial=initial,
         atoms_final=final,
@@ -50,6 +52,7 @@ Usage example:
         kpointstype='gamma',
         n_images=10,
         fmax=0.01,
+        magmom=magmom_dict
     )
     job.create_job_dir(job_path=f"{main_path}/ts/{elementary_step}/mlneb")
 """
@@ -63,7 +66,7 @@ from ase.mep import NEB
 from pymatgen.io.ase import AseAtomsAdaptor
 
 class MLNEB:
-    def __init__(self, atoms_initial, atoms_final, incar_tags, kspacing, kpointstype, n_images, fmax):
+    def __init__(self, atoms_initial, atoms_final, incar_tags, kspacing, kpointstype, n_images, fmax, magmom=None):
         """
         Parameters
         ----------
@@ -82,6 +85,10 @@ class MLNEB:
             Total number of images in the NEB interpolation (including initial and final).
         fmax : float
             fmax for the ML-NEB run (applied to the NEB optimization).
+        magmom : dict, optional
+            Dictionary mapping element symbols to initial magnetic moments.
+            For elements not included, a default of 0.0 is assumed.
+            The resulting MAGMOM tag is added to the INCAR file if at least one value is non-zero.
         """
         self.atoms_initial = atoms_initial
         self.atoms_final = atoms_final
@@ -90,6 +97,7 @@ class MLNEB:
         self.kpointstype = kpointstype.lower()
         self.n_images = n_images
         self.fmax = fmax
+        self.magmom = magmom
         # For MLNEB, periodicity is always '2d'
         self.periodicity = '2d'
 
@@ -148,20 +156,17 @@ class MLNEB:
         initial_fmax = abs(processed_tags.get('ediffg', 0.01))
 
         # Calculate k-points from the kspacing using the initial structure.
-        # Get the structure from the ASE Atoms object.
         structure = AseAtomsAdaptor().get_structure(self.atoms_initial)
         recip = structure.lattice.reciprocal_lattice  # in Å^-1
         b1, b2, b3 = recip.matrix
         b1_len = np.linalg.norm(b1)
         b2_len = np.linalg.norm(b2)
         b3_len = np.linalg.norm(b3)
-        # Rk = 2π / kspacing
         Rk = 2 * pi / self.kspacing
         n1 = max(1, int(Rk * b1_len + 0.5))
         n2 = max(1, int(Rk * b2_len + 0.5))
         n3 = max(1, int(Rk * b3_len + 0.5))
-        # For 2D, fix the z-direction k-points to 1
-        n3 = 1
+        n3 = 1  # For 2D, fix the z-direction k-points to 1
         kpts_tuple = (n1, n2, n3)
         gamma_flag = True if self.kpointstype == 'gamma' else False
 
@@ -174,7 +179,18 @@ class MLNEB:
             calc_params_lines.append(f"    {key}={repr(value)},")
         calc_params_lines.append(f"    kpts={kpts_tuple},")
         calc_params_lines.append(f"    gamma={gamma_flag},")
+        if self.magmom is not None:
+            calc_params_lines.append("    magmom=magmom_list,")
         calc_params_str = "\n".join(calc_params_lines)
+
+        # Prepare additional run.py lines for magmom if specified.
+        magmom_lines = ""
+        if self.magmom is not None:
+            magmom_lines = (
+                "atoms = read('./optimized_structures/initial.traj')\n"
+                f"magmom_dict = {repr(self.magmom)}\n"
+                "magmom_list = [magmom_dict.get(atom.symbol, 0.0) for atom in atoms]\n"
+            )
 
         # Create the run.py file content with time logging, endpoint optimizations,
         # and the ML-NEB run using catlearn.
@@ -191,7 +207,7 @@ dt_string = now.strftime('%d/%m/%Y %H:%M:%S')
 with open('time.txt', 'w') as outfile:
     outfile.write(f'{{dt_string}}: starting job ...\\n')
 
-ase_calculator = Vasp(setups={{'base': 'recommended'}},
+{magmom_lines}ase_calculator = Vasp(setups={{'base': 'recommended'}},
 {calc_params_str}
 )
 
