@@ -219,15 +219,18 @@ class StructureOptimization:
         counts.append(count)
 
         magmom_entries = []
-        all_zero = True
+        zeros_count = 0
         for elem, cnt in zip(unique_elements, counts):
-            # Use provided magmom value or default to 0.0.
             mag = self.magmom.get(elem, 0.0)
-            if mag != 0.0:
-                all_zero = False
-            magmom_entries.append(f"{cnt}*{mag}")
-        if all_zero:
-            return ""
+            if mag == 0.0:
+                zeros_count += cnt
+            else:
+                if zeros_count > 0:
+                    magmom_entries.append(f"{zeros_count}*0.0")
+                    zeros_count = 0
+                magmom_entries.append(f"{cnt}*{mag}")
+        if zeros_count > 0:
+            magmom_entries.append(f"{zeros_count}*0.0")
         return " ".join(magmom_entries)
 
     def _write_kpoints(self, folder_name):
