@@ -98,8 +98,6 @@ class MLNEB:
         self.n_images = n_images
         self.fmax = fmax
         self.magmom = magmom
-        # For MLNEB, periodicity is always '2d'
-        self.periodicity = '2d'
 
     def create_job_dir(self, job_path):
         """

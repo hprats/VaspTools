@@ -17,54 +17,6 @@ with open(valid_incar_file, 'r') as f:
 VALID_INCAR_TAGS = set(lines)
 
 
-def write_potcar(job_path, poscar_elements, pp_dict, pp_path):
-    """
-    Writes the POTCAR file for the elements in poscar_elements, in order.
-
-    Parameters
-    ----------
-    job_path : str
-        Path to the output folder.
-    poscar_elements : list of str
-        Chemical symbols in the order they appear in the POSCAR.
-    pp_dict : dict
-        Mapping from element symbol -> subfolder name. E.g. {'Al': 'Al', 'W': 'W_pv'}.
-    pp_path : str
-        Path to the folder containing all POTCAR subfolders (user-specific).
-
-    Raises
-    ------
-    ValueError
-        If `poscar_elements` is empty or no mapping is found for a given element.
-    FileNotFoundError
-        If the required POTCAR file does not exist.
-    """
-    if not poscar_elements:
-        raise ValueError("No elements found to build POTCAR.")
-
-    # Build a minimal list of elements in the correct order (avoid duplicates in a row).
-    current_element = poscar_elements[0]
-    elements_for_potcar = [current_element]
-    for element in poscar_elements[1:]:
-        if element != current_element:
-            elements_for_potcar.append(element)
-            current_element = element
-
-    # Concatenate POTCARs by shelling out a `cat`.
-    cmd = "cat"
-    for element in elements_for_potcar:
-        pot_subfolder = pp_dict.get(element)
-        if pot_subfolder is None:
-            raise ValueError(f"No POTCAR mapping found for element '{element}' in `pp_dict`.")
-        potcar_path = os.path.join(pp_path, pot_subfolder, "POTCAR")
-        if not os.path.exists(potcar_path):
-            raise FileNotFoundError(f"POTCAR not found at {potcar_path}")
-        cmd += f" {potcar_path}"
-
-    potcar_out = os.path.join(job_path, "POTCAR")
-    os.system(f"{cmd} > {potcar_out}")
-
-
 class StructureOptimization:
     """
     Prepare input files (INCAR, KPOINTS, POSCAR, POTCAR) for VASP structure optimization
@@ -88,7 +40,8 @@ class StructureOptimization:
         Either 'gamma' (Gamma-centered) or 'mp' (Monkhorst-Pack). Default is 'gamma'.
         This should not be provided if `periodicity=None`.
     potcar_dict : dict, optional
-        Dictionary mapping element symbol -> POTCAR subfolder name. Default is VASP recommended PP.
+        Dictionary mapping element symbol -> POTCAR subfolder name.
+        Defaults to VASP_RECOMMENDED_PP if not specified.
     periodicity : str or None, optional
         '2d' (slab), '3d' (bulk), or None for non-periodic (gas-phase) calculations.
         Default is '2d'.
@@ -99,7 +52,7 @@ class StructureOptimization:
     >>> atoms = bulk('Si')
     >>> incar_tags = {'ISIF': 3, 'IBRION': 2, 'ENCUT': 520}
     >>> magmom = {'Co': 1.67}
-    >>> job = StructureOptimization(atoms, incar_tags, magmom, 0.5, 'gamma', {}, '3d')
+    >>> job = StructureOptimization(atoms, incar_tags, magmom, 0.5, 'gamma', VASP_RECOMMENDED_PP, '3d')
     >>> job.write_input_files(folder_name='test_si_opt')
     """
 
@@ -129,8 +82,8 @@ class StructureOptimization:
             self.kspacing = float(kspacing)
             self.kpointstype = kpointstype.lower()
 
-        if potcar_dict is None:
-            potcar_dict = {}
+        if not isinstance(potcar_dict, dict):
+            raise ValueError("potcar_dict must be a dictionary.")
         self.potcar_dict = potcar_dict
 
         # Validate INCAR tags
@@ -293,8 +246,7 @@ Monkhorst Pack
 
     def _write_potcar(self, folder_name):
         """
-        Gather the list of unique elements from the ASE atoms object, then concatenate
-        the correct POTCAR files.
+        Write the POTCAR file by concatenating the appropriate POTCAR files for each element.
 
         Parameters
         ----------
@@ -302,12 +254,30 @@ Monkhorst Pack
             The directory in which to write the POTCAR.
         """
         symbols = self.atoms.get_chemical_symbols()  # e.g. ['Al', 'W', 'C', ...]
-        write_potcar(
-            job_path=folder_name,
-            poscar_elements=symbols,
-            pp_dict=self.potcar_dict,
-            pp_path=PP_PATH  # from user_data.py
-        )
+        if not symbols:
+            raise ValueError("No elements found to build POTCAR.")
+
+        # Build a minimal list of elements in the correct order (avoid duplicates in a row).
+        current_element = symbols[0]
+        elements_for_potcar = [current_element]
+        for element in symbols[1:]:
+            if element != current_element:
+                elements_for_potcar.append(element)
+                current_element = element
+
+        # Concatenate POTCARs by shelling out a `cat`.
+        cmd = "cat"
+        for element in elements_for_potcar:
+            pot_subfolder = self.potcar_dict.get(element)
+            if pot_subfolder is None:
+                raise ValueError(f"No POTCAR mapping found for element '{element}' in `potcar_dict`.")
+            potcar_path = os.path.join(PP_PATH, pot_subfolder, "POTCAR")
+            if not os.path.exists(potcar_path):
+                raise FileNotFoundError(f"POTCAR not found at {potcar_path}")
+            cmd += f" {potcar_path}"
+
+        potcar_out = os.path.join(folder_name, "POTCAR")
+        os.system(f"{cmd} > {potcar_out}")
 
     def _check_incar_tags(self):
         """
