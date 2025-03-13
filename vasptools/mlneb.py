@@ -43,6 +43,7 @@ Usage example:
     final = read(f"{main_path}/ts/{elementary_step}/final/CONTCAR")
 
     magmom_dict = {'Co': 1.67, 'Pt': 0.0, 'C': 0.0, 'O': 0.0}
+    potcar_dict = {'H': 'H', 'Ca': 'Ca_sv'}  # Example custom pseudopotential mapping
 
     job = MLNEB(
         atoms_initial=initial,
@@ -52,7 +53,8 @@ Usage example:
         kpointstype='gamma',
         n_images=10,
         fmax=0.01,
-        magmom=magmom_dict
+        magmom=magmom_dict,
+        potcar_dict=potcar_dict  # Optional; defaults to {'base': 'recommended'}
     )
     job.create_job_dir(job_path=f"{main_path}/ts/{elementary_step}/mlneb")
 """
@@ -66,7 +68,7 @@ from ase.mep import NEB
 from pymatgen.io.ase import AseAtomsAdaptor
 
 class MLNEB:
-    def __init__(self, atoms_initial, atoms_final, incar_tags, kspacing, kpointstype, n_images, fmax, magmom=None):
+    def __init__(self, atoms_initial, atoms_final, incar_tags, kspacing, kpointstype, n_images, fmax, magmom=None, potcar_dict=None):
         """
         Parameters
         ----------
@@ -89,6 +91,9 @@ class MLNEB:
             Dictionary mapping element symbols to initial magnetic moments.
             For elements not included, a default of 0.0 is assumed.
             The resulting MAGMOM tag is added to the INCAR file if at least one value is non-zero.
+        potcar_dict : dict, optional
+            Dictionary mapping element symbol -> POTCAR subfolder name.
+            Defaults to VASP_RECOMMENDED_PP if not specified.
         """
         self.atoms_initial = atoms_initial
         self.atoms_final = atoms_final
@@ -98,6 +103,7 @@ class MLNEB:
         self.n_images = n_images
         self.fmax = fmax
         self.magmom = magmom
+        self.potcar_dict = potcar_dict if potcar_dict is not None else {'base': 'recommended'}
 
     def create_job_dir(self, job_path):
         """
@@ -159,12 +165,10 @@ class MLNEB:
         b1, b2, b3 = recip.matrix
         b1_len = np.linalg.norm(b1)
         b2_len = np.linalg.norm(b2)
-        b3_len = np.linalg.norm(b3)
         Rk = 2 * pi / self.kspacing
         n1 = max(1, int(Rk * b1_len + 0.5))
         n2 = max(1, int(Rk * b2_len + 0.5))
-        n3 = max(1, int(Rk * b3_len + 0.5))
-        n3 = 1  # For 2D, fix the z-direction k-points to 1
+        n3 = 1  # 2D, fix the z-direction k-points to 1
         kpts_tuple = (n1, n2, n3)
         gamma_flag = True if self.kpointstype == 'gamma' else False
 
@@ -190,6 +194,9 @@ class MLNEB:
                 "magmom_list = [magmom_dict.get(atom.symbol, 0.0) for atom in atoms]\n"
             )
 
+        # Prepare potcar_dict lines to be added to run.py
+        potcar_lines = f"potcar_dict = {repr(self.potcar_dict)}\n\n"
+
         # Create the run.py file content with time logging, endpoint optimizations,
         # and the ML-NEB run using catlearn.
         run_py_content = f'''from ase.io import read
@@ -200,12 +207,13 @@ import copy
 from catlearn.optimize.mlneb import MLNEB
 from datetime import datetime
 
-now = datetime.now()
+{potcar_lines}now = datetime.now()
 dt_string = now.strftime('%d/%m/%Y %H:%M:%S')
 with open('time.txt', 'w') as outfile:
     outfile.write(f'{{dt_string}}: starting job ...\\n')
 
-{magmom_lines}ase_calculator = Vasp(setups={{'base': 'recommended'}},
+{magmom_lines}ase_calculator = Vasp(
+    setups=potcar_dict,
 {calc_params_str}
 )
 
