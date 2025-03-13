@@ -5,7 +5,7 @@ import numpy as np
 from math import pi
 from ase.io import write
 from pymatgen.io.ase import AseAtomsAdaptor
-from .user_data import PP_PATH
+from .potcar_library_path import get_potcar_library_path
 from .vasp_recommended_pp import VASP_RECOMMENDED_PP
 
 # Load valid INCAR tags from valid_incar_tags.txt file
@@ -15,6 +15,9 @@ valid_incar_file = os.path.join(this_dir, 'valid_incar_tags.txt')
 with open(valid_incar_file, 'r') as f:
     lines = [ln.strip() for ln in f if ln.strip()]
 VALID_INCAR_TAGS = set(lines)
+
+# Load path to the potcar library
+PP_LIBRARY_PATH = get_potcar_library_path()
 
 
 class StructureOptimization:
@@ -271,7 +274,7 @@ Monkhorst Pack
             pot_subfolder = self.potcar_dict.get(element)
             if pot_subfolder is None:
                 raise ValueError(f"No POTCAR mapping found for element '{element}' in `potcar_dict`.")
-            potcar_path = os.path.join(PP_PATH, pot_subfolder, "POTCAR")
+            potcar_path = os.path.join(PP_LIBRARY_PATH, pot_subfolder, "POTCAR")
             if not os.path.exists(potcar_path):
                 raise FileNotFoundError(f"POTCAR not found at {potcar_path}")
             cmd += f" {potcar_path}"
