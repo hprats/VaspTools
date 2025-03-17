@@ -33,8 +33,8 @@ class StructureOptimization:
         Dictionary of INCAR tags, e.g. {'ISIF': 3, 'IBRION': 2, ...}.
     magmom : dict, optional
         Dictionary mapping element symbols to initial magnetic moments.
+        If provided, the MAGMOM tag is added to the INCAR file.
         For elements not included, a default of 0.0 is assumed.
-        The resulting MAGMOM tag is added to the INCAR file if at least one value is non-zero.
     kspacing : float, optional
         The smallest allowed k-point spacing in Å^-1. Default is 1.0.
         Recommended: 0.66 for bulk optimization, 1.0 for the rest.
@@ -72,7 +72,15 @@ class StructureOptimization:
         self.atoms = atoms
         self.incar_tags = incar_tags
         self.periodicity = periodicity
-        self.magmom = magmom if magmom is not None else {}
+        self.magmom = magmom
+
+        if self.magmom is not None:
+            ispin_value = self.incar_tags.get('ISPIN', None)
+            if ispin_value != 2:
+                warnings.warn(
+                    f"When providing a magmom dictionary, the ISPIN tag should be set to 2. Found ISPIN={ispin_value}.",
+                    UserWarning
+                )
 
         if self.periodicity is None:
             if kspacing != 1.0 or kpointstype != 'gamma':
@@ -143,14 +151,15 @@ class StructureOptimization:
         with open(incar_path, "w") as f:
             for tag_key, tag_val in self.incar_tags.items():
                 f.write(f"{tag_key} = {tag_val}\n")
-            magmom_str = self._generate_magmom_string()
-            if magmom_str:
-                f.write(f"MAGMOM = {magmom_str}\n")
+            if self.magmom is not None:
+                magmom_str = self._generate_magmom_string()
+                if magmom_str:
+                    f.write(f"MAGMOM = {magmom_str}\n")
 
     def _generate_magmom_string(self):
         """
         Generate the MAGMOM string based on the atoms' ordering and the magmom dictionary.
-        Elements not specified in the dictionary are assigned a default value of 0.0.
+        For elements not specified in the provided dictionary, a default of 0.0 is used.
         Returns an empty string if all magmom values are zero.
         """
         symbols = self.atoms.get_chemical_symbols()
