@@ -1,10 +1,8 @@
 import os
 import warnings
 import numpy as np
-
-from math import pi
+from math import pi, ceil
 from ase.io import write
-from pymatgen.io.ase import AseAtomsAdaptor
 from .potcar_library_path import get_potcar_library_path
 from .vasp_recommended_pp import VASP_RECOMMENDED_PP
 
@@ -36,18 +34,24 @@ class StructureOptimization:
         If provided, the MAGMOM tag is added to the INCAR file.
         For elements not included, a default of 0.0 is assumed.
     kspacing : float or None, optional
-        The smallest allowed k-point spacing in Å^-1.
-        If set to None (default), no KPOINTS file is written.
-        Recommended values (when provided): 0.66 for bulk optimization, 1.0 otherwise.
-        This should not be provided if `periodicity=None` (gas-phase).
+        If provided (not None), the smallest allowed k-point spacing in Å^-1.
+        If None, no KPOINTS file is written; instead, the user must have provided
+        a 'KSPACING' entry in the INCAR tags.
+    kspacing_definition : {'vasp', 'pymatgen'}, optional
+        How the provided kspacing value should be interpreted.
+        - 'pymatgen' (default): Assumes the reciprocal lattice vectors already
+          include a 2*pi factor (as returned by pymatgen).
+        - 'vasp': Uses the VASP convention where the reciprocal lattice vectors do
+          not have the extra 2*pi. In this case, the number of k-points along a direction
+          is computed as: n_i = max(1, int(|b_i|/kspacing + 0.5)).
     kpointstype : str, optional
         Either 'gamma' (Gamma-centered) or 'mp' (Monkhorst-Pack). Default is 'gamma'.
-        This should not be provided if `periodicity=None`.
     potcar_dict : dict, optional
         Dictionary mapping element symbol -> POTCAR subfolder name.
         Defaults to VASP_RECOMMENDED_PP if not specified.
     periodicity : str or None, optional
         '2d' (slab), '3d' (bulk), or None for non-periodic (gas-phase) calculations.
+        If periodicity is None (gas-phase), a single Gamma point is used.
         Default is '2d'.
 
 
@@ -66,7 +70,8 @@ class StructureOptimization:
         atoms,
         incar_tags,
         magmom=None,
-        kspacing=None,
+        kspacing=1.0,
+        kspacing_definition='pymatgen',
         kpointstype='gamma',
         potcar_dict=VASP_RECOMMENDED_PP,
         periodicity='2d',
@@ -76,6 +81,12 @@ class StructureOptimization:
         self.periodicity = periodicity
         self.magmom = magmom
 
+        # Set the k-spacing and its definition.
+        self.kspacing = kspacing
+        self.kspacing_definition = kspacing_definition.lower()
+        if self.kspacing_definition not in ['vasp', 'pymatgen']:
+            raise ValueError("kspacing_definition must be either 'vasp' or 'pymatgen'.")
+
         if self.magmom is not None:
             ispin_value = self.incar_tags.get('ISPIN', None)
             if ispin_value != 2:
@@ -84,21 +95,20 @@ class StructureOptimization:
                     UserWarning
                 )
 
-        # For gas-phase (periodicity=None) ensure that kspacing/kpointstype are not provided.
-        if self.periodicity is None:
-            if kspacing is not None:
-                raise ValueError(
-                    "For periodicity=None (gas-phase), do not provide kspacing or kpointstype."
-                )
-            self.kspacing = None
-            self.kpointstype = None
+        # Validate kspacing and periodicity
+        if self.kspacing is None:
+            # If kspacing is None, the KPOINTS file will not be written;
+            # check that the 'KSPACING' tag is provided in the INCAR tags.
+            if 'KSPACING' not in self.incar_tags:
+                raise ValueError("kspacing is None. Please provide 'KSPACING' in incar_tags to allow VASP to generate the k-points automatically.")
+            self.kpointstype = None  # Not used when no KPOINTS file is written.
         else:
-            if kspacing is None:
-                # No KPOINTS file will be generated if kspacing is None
-                self.kspacing = None
-                self.kpointstype = None
+            if self.periodicity is None:
+                # For non-periodic (gas-phase) calculations: only a single Gamma point is used.
+                self.kpointstype = kpointstype.lower()
             else:
-                self.kspacing = float(kspacing)
+                # For periodic calculations (2d or 3d), ensure kspacing is a float.
+                self.kspacing = float(self.kspacing)
                 self.kpointstype = kpointstype.lower()
 
         if not isinstance(potcar_dict, dict):
@@ -208,21 +218,25 @@ class StructureOptimization:
 
     def _write_kpoints(self, folder_name):
         """
-        Write the KPOINTS file if kspacing is provided.
-        If kspacing is None, no KPOINTS file is generated.
+        Write the KPOINTS file.
 
-        Parameters
-        ----------
-        folder_name : str
-            The directory in which to write the KPOINTS file.
+        Steps:
+        1. If kspacing is None, do not write a KPOINTS file, but check that 'KSPACING'
+           is specified in the INCAR tags.
+        2. If periodicity is None (non-periodic: gas-phase), write a single Gamma point.
+        3. For periodic systems (2d or 3d), calculate the k-point mesh using the provided
+           kspacing and kspacing_definition.
+           For 2D periodicity, the z-direction is always set to 1.
         """
-        # If no kspacing is provided, do not write a KPOINTS file.
-        if self.kspacing is None:
-            return
-
         kpoints_path = os.path.join(folder_name, "KPOINTS")
 
-        # Non-periodic case: single k-point
+        # Case 1: If kspacing is None.
+        if self.kspacing is None:
+            if "KSPACING" not in self.incar_tags:
+                raise ValueError("When kspacing is None, 'KSPACING' must be provided in incar_tags.")
+            return
+
+        # Case 2: If periodicity is None (non-periodic: gas-phase), use a single Gamma point.
         if self.periodicity is None:
             content = """Gamma-point only
  0
@@ -234,26 +248,50 @@ Monkhorst Pack
                 f.write(content)
             return
 
-        # Periodic case: 2D or 3D
-        structure = AseAtomsAdaptor().get_structure(self.atoms)
-        recip = structure.lattice.reciprocal_lattice  # in Å^-1
-        b1, b2, b3 = recip.matrix
-        b1_len = np.linalg.norm(b1)
-        b2_len = np.linalg.norm(b2)
-        b3_len = np.linalg.norm(b3)
+        # Case 3: For periodic systems (2d or 3d), calculate the k-point mesh.
+        # Obtain the cell from the ASE Atoms object.
+        cell = np.array(self.atoms.get_cell())
+        # Compute the cell volume: V = a1 · (a2 x a3)
+        volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
 
-        # Rk = 2π / kspacing
-        Rk = 2 * pi / self.kspacing
+        # Calculate the number of k-points according to the specified definition.
+        if self.kspacing_definition == 'pymatgen':
+            # Using pymatgen's convention: n_i = max(1, int((2π/kspacing)*|b_i| + 0.5))
 
-        n1 = max(1, int(Rk * b1_len + 0.5))
-        n2 = max(1, int(Rk * b2_len + 0.5))
-        n3 = max(1, int(Rk * b3_len + 0.5))
+            # Compute the reciprocal lattice vectors:
+            b1 = 2 * pi * np.cross(cell[1], cell[2]) / volume
+            b2 = 2 * pi * np.cross(cell[2], cell[0]) / volume
+            b3 = 2 * pi * np.cross(cell[0], cell[1]) / volume
 
-        # If 2D, fix the z-direction k-points to 1
+            # Determine the lengths of the reciprocal lattice vectors.
+            b1_len = np.linalg.norm(b1)
+            b2_len = np.linalg.norm(b2)
+            b3_len = np.linalg.norm(b3)
+
+            Rk = 2 * pi / self.kspacing
+            n1 = max(1, int(Rk * b1_len + 0.5))
+            n2 = max(1, int(Rk * b2_len + 0.5))
+            n3 = max(1, int(Rk * b3_len + 0.5))
+        elif self.kspacing_definition == 'vasp':
+            # Using VASP's convention:
+            # N_i = max(1, ceiling(|b_i| * 2π / kspacing))
+            b1 = np.cross(cell[1], cell[2]) / volume
+            b2 = np.cross(cell[2], cell[0]) / volume
+            b3 = np.cross(cell[0], cell[1]) / volume
+            b1_len = np.linalg.norm(b1)
+            b2_len = np.linalg.norm(b2)
+            b3_len = np.linalg.norm(b3)
+            n1 = max(1, ceil(b1_len * 2 * pi / self.kspacing))
+            n2 = max(1, ceil(b2_len * 2 * pi / self.kspacing))
+            n3 = max(1, ceil(b3_len * 2 * pi / self.kspacing))
+        else:
+            raise ValueError("kspacing_definition must be either 'vasp' or 'pymatgen'.")
+
+        # For 2D periodicity, force the number of k-points in the z-direction to 1.
         if self.periodicity == '2d':
             n3 = 1
 
-        # KPOINTS style
+        # Determine the KPOINTS style and shift.
         kpts_style = "Gamma" if self.kpointstype == 'gamma' else "Monkhorst"
         shift_line = "0 0 0" if self.kpointstype == 'gamma' else "0.5 0.5 0.5"
 
