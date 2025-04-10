@@ -35,10 +35,11 @@ class StructureOptimization:
         Dictionary mapping element symbols to initial magnetic moments.
         If provided, the MAGMOM tag is added to the INCAR file.
         For elements not included, a default of 0.0 is assumed.
-    kspacing : float, optional
-        The smallest allowed k-point spacing in Å^-1. Default is 1.0.
-        Recommended: 0.66 for bulk optimization, 1.0 for the rest.
-        This should not be provided if `periodicity=None`.
+    kspacing : float or None, optional
+        The smallest allowed k-point spacing in Å^-1.
+        If set to None (default), no KPOINTS file is written.
+        Recommended values (when provided): 0.66 for bulk optimization, 1.0 otherwise.
+        This should not be provided if `periodicity=None` (gas-phase).
     kpointstype : str, optional
         Either 'gamma' (Gamma-centered) or 'mp' (Monkhorst-Pack). Default is 'gamma'.
         This should not be provided if `periodicity=None`.
@@ -48,6 +49,7 @@ class StructureOptimization:
     periodicity : str or None, optional
         '2d' (slab), '3d' (bulk), or None for non-periodic (gas-phase) calculations.
         Default is '2d'.
+
 
     Examples
     --------
@@ -64,7 +66,7 @@ class StructureOptimization:
         atoms,
         incar_tags,
         magmom=None,
-        kspacing=1.0,
+        kspacing=None,
         kpointstype='gamma',
         potcar_dict=VASP_RECOMMENDED_PP,
         periodicity='2d',
@@ -82,16 +84,22 @@ class StructureOptimization:
                     UserWarning
                 )
 
+        # For gas-phase (periodicity=None) ensure that kspacing/kpointstype are not provided.
         if self.periodicity is None:
-            if kspacing != 1.0 or kpointstype != 'gamma':
+            if kspacing is not None:
                 raise ValueError(
                     "For periodicity=None (gas-phase), do not provide kspacing or kpointstype."
                 )
             self.kspacing = None
             self.kpointstype = None
         else:
-            self.kspacing = float(kspacing)
-            self.kpointstype = kpointstype.lower()
+            if kspacing is None:
+                # No KPOINTS file will be generated if kspacing is None
+                self.kspacing = None
+                self.kpointstype = None
+            else:
+                self.kspacing = float(kspacing)
+                self.kpointstype = kpointstype.lower()
 
         if not isinstance(potcar_dict, dict):
             raise ValueError("potcar_dict must be a dictionary.")
@@ -105,7 +113,7 @@ class StructureOptimization:
 
     def write_input_files(self, folder_name="bulk"):
         """
-        Write INCAR, KPOINTS, POSCAR, and POTCAR to `folder_name`.
+        Write INCAR, KPOINTS (if kspacing is provided), POSCAR, and POTCAR to `folder_name`.
         If the folder already exists, print a warning and do nothing.
 
         Parameters
@@ -200,15 +208,18 @@ class StructureOptimization:
 
     def _write_kpoints(self, folder_name):
         """
-        Write the KPOINTS file. If periodicity is None (gas-phase),
-        write a single k-point (Gamma only). Otherwise, compute
-        the k-point mesh from user-specified kspacing and type.
+        Write the KPOINTS file if kspacing is provided.
+        If kspacing is None, no KPOINTS file is generated.
 
         Parameters
         ----------
         folder_name : str
             The directory in which to write the KPOINTS file.
         """
+        # If no kspacing is provided, do not write a KPOINTS file.
+        if self.kspacing is None:
+            return
+
         kpoints_path = os.path.join(folder_name, "KPOINTS")
 
         # Non-periodic case: single k-point
