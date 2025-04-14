@@ -240,7 +240,7 @@ class StructureOptimization:
         if self.periodicity is None:
             content = """Gamma-point only
  0
-Monkhorst Pack
+Gamma
  1 1 1
  0 0 0
 """
