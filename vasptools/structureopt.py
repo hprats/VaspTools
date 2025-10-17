@@ -18,6 +18,11 @@ VALID_INCAR_TAGS = set(lines)
 PP_LIBRARY_PATH = get_potcar_library_path()
 
 
+def _is_comment_key(key) -> bool:
+    """Return True if the key should be treated as a comment line in INCAR."""
+    return isinstance(key, str) and key.lstrip().startswith('#')
+
+
 class StructureOptimization:
     """
     Prepare input files (INCAR, KPOINTS, POSCAR, POTCAR) for VASP structure optimization
@@ -147,11 +152,6 @@ class StructureOptimization:
     def _write_poscar(self, folder_name):
         """
         Write the POSCAR file using ASE’s VASP writer.
-
-        Parameters
-        ----------
-        folder_name : str
-            The directory in which to write the POSCAR.
         """
         poscar_path = os.path.join(folder_name, "POSCAR")
         write(poscar_path, self.atoms, format="vasp", direct=True, vasp5=True)
@@ -159,16 +159,15 @@ class StructureOptimization:
     def _write_incar(self, folder_name):
         """
         Write the INCAR file based on the incar_tags dictionary and include MAGMOM tag if applicable.
-
-        Parameters
-        ----------
-        folder_name : str
-            The directory in which to write the INCAR.
         """
         incar_path = os.path.join(folder_name, "INCAR")
         with open(incar_path, "w") as f:
             for tag_key, tag_val in self.incar_tags.items():
-                f.write(f"{tag_key} = {tag_val}\n")
+                if _is_comment_key(tag_key):
+                    # Write comments as-is, no '=' and no value
+                    f.write(f"{tag_key}\n")
+                else:
+                    f.write(f"{tag_key} = {tag_val}\n")
             if self.magmom is not None:
                 magmom_str = self._generate_magmom_string()
                 if magmom_str:
@@ -249,9 +248,7 @@ Gamma
             return
 
         # Case 3: For periodic systems (2d or 3d), calculate the k-point mesh.
-        # Obtain the cell from the ASE Atoms object.
         cell = np.array(self.atoms.get_cell())
-        # Compute the cell volume: V = a1 · (a2 x a3)
         volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
 
         # Calculate the number of k-points according to the specified definition.
@@ -272,6 +269,7 @@ Gamma
             n1 = max(1, int(Rk * b1_len + 0.5))
             n2 = max(1, int(Rk * b2_len + 0.5))
             n3 = max(1, int(Rk * b3_len + 0.5))
+
         elif self.kspacing_definition == 'vasp':
             # Using VASP's convention:
             # N_i = max(1, ceiling(|b_i| * 2π / kspacing))
@@ -284,6 +282,7 @@ Gamma
             n1 = max(1, ceil(b1_len * 2 * pi / self.kspacing))
             n2 = max(1, ceil(b2_len * 2 * pi / self.kspacing))
             n3 = max(1, ceil(b3_len * 2 * pi / self.kspacing))
+
         else:
             raise ValueError("kspacing_definition must be either 'vasp' or 'pymatgen'.")
 
@@ -308,11 +307,6 @@ Gamma
     def _write_potcar(self, folder_name):
         """
         Write the POTCAR file by concatenating the appropriate POTCAR files for each element.
-
-        Parameters
-        ----------
-        folder_name : str
-            The directory in which to write the POTCAR.
         """
         symbols = self.atoms.get_chemical_symbols()  # e.g. ['Al', 'W', 'C', ...]
         if not symbols:
