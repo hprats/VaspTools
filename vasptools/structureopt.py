@@ -337,10 +337,12 @@ Gamma
     def _check_incar_tags(self):
         """
         Verify that all user-specified INCAR tags are recognized VASP tags.
-        Warn if any unrecognized tags are found.
+        Warn if any unrecognized (non-comment) tags are found.
         """
         user_keys = set(self.incar_tags.keys())
-        invalid_keys = user_keys - set(VALID_INCAR_TAGS)
+        # Exclude comment keys from validation
+        non_comment_keys = {k for k in user_keys if not _is_comment_key(k)}
+        invalid_keys = non_comment_keys - set(VALID_INCAR_TAGS)
         if invalid_keys:
             warnings.warn(
                 f"The following INCAR tags are not recognized as standard VASP tags: {invalid_keys}",
