@@ -353,7 +353,7 @@ Gamma
         """
         Check that `ISIF` is consistent with the specified periodicity.
         For 3D, ISIF should be 3.
-        For 2D, ISIF should be 0 (or omitted).
+        For 2D, ISIF should be 0 or 4 (or omitted).
         If periodicity=None (gas-phase), we do not impose any specific ISIF.
         """
         isif_value = self.incar_tags.get('ISIF', None)
@@ -364,15 +364,19 @@ Gamma
                     f"Recommended ISIF=3 for 3D periodicity, but got ISIF={isif_value}.",
                     UserWarning
                 )
+
         elif self.periodicity == '2d':
-            if isif_value is not None and isif_value != 0:
+            # Allow ISIF = 0, 4 or not set; warn otherwise
+            if isif_value is not None and isif_value not in (0, 4):
                 warnings.warn(
-                    f"Recommended ISIF=0 or omit it for 2D periodicity, but got ISIF={isif_value}.",
+                    f"Recommended ISIF=0 or 4 (or omit it) for 2D periodicity, but got ISIF={isif_value}.",
                     UserWarning
                 )
+
         elif self.periodicity is None:
             # Gas-phase: no restrictions on ISIF.
             return
+
         else:
             warnings.warn(
                 f"Unknown periodicity '{self.periodicity}'. Expected '2d', '3d', or None.",
