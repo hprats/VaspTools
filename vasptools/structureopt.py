@@ -40,8 +40,14 @@ class StructureOptimization:
         For elements not included, a default of 0.0 is assumed.
     kspacing : float or None, optional
         If provided (not None), the smallest allowed k-point spacing in Å^-1.
-        If None, no KPOINTS file is written; instead, the user must have provided
-        a 'KSPACING' entry in the INCAR tags.
+        Mutually exclusive with `kpoints` and with providing a 'KSPACING' tag in `incar_tags`.
+        If None, VASP k-point generation must be specified either via `kpoints` or via
+        a 'KSPACING' entry in `incar_tags`.
+    kpoints : tuple(int, int, int) or None, optional
+        Explicit k-point mesh, e.g. (5, 5, 1) for a 5x5x1 grid.
+        Mutually exclusive with `kspacing` and with providing a 'KSPACING' tag in `incar_tags`.
+        For 2D periodicity, the third value is forced to 1.
+        Only applicable if kspacing is not None. Ignored otherwise.
     kspacing_definition : {'vasp', 'pymatgen'}, optional
         How the provided kspacing value should be interpreted.
         - 'pymatgen' (default): Assumes the reciprocal lattice vectors already
@@ -49,6 +55,7 @@ class StructureOptimization:
         - 'vasp': Uses the VASP convention where the reciprocal lattice vectors do
           not have the extra 2*pi. In this case, the number of k-points along a direction
           is computed as: n_i = max(1, int(|b_i|/kspacing + 0.5)).
+        Only applicable if kspacing is not None. Ignored otherwise.
     kpointstype : str, optional
         Either 'gamma' (Gamma-centered) or 'mp' (Monkhorst-Pack). Default is 'gamma'.
     potcar_dict : dict, optional
@@ -75,7 +82,8 @@ class StructureOptimization:
         atoms,
         incar_tags,
         magmom=None,
-        kspacing=1.0,
+        kspacing=None,
+        kpoints=None,
         kspacing_definition='pymatgen',
         kpointstype='gamma',
         potcar_dict=VASP_RECOMMENDED_PP,
@@ -86,11 +94,20 @@ class StructureOptimization:
         self.periodicity = periodicity
         self.magmom = magmom
 
-        # Set the k-spacing and its definition.
+        # Set the k-point generation options.
+        # Exactly one of the following three options must be used:
+        #   1) `kspacing` (write a KPOINTS file based on spacing)
+        #   2) `kpoints`  (write a KPOINTS file with an explicit mesh)
+        #   3) 'KSPACING' in `incar_tags` (let VASP generate k-points; do not write KPOINTS)
         self.kspacing = kspacing
-        self.kspacing_definition = kspacing_definition.lower()
-        if self.kspacing_definition not in ['vasp', 'pymatgen']:
-            raise ValueError("kspacing_definition must be either 'vasp' or 'pymatgen'.")
+        self.kpoints = kpoints
+
+                # `kspacing_definition` is only relevant when `kspacing` is used to generate the mesh.
+        # If `kspacing` is None (explicit `kpoints` or INCAR `KSPACING`), this flag is ignored.
+        self.kspacing_definition = kspacing_definition.lower() if kspacing_definition is not None else None
+        if self.kspacing is not None:
+            if self.kspacing_definition not in ['vasp', 'pymatgen']:
+                raise ValueError("kspacing_definition must be either 'vasp' or 'pymatgen'.")
 
         if self.magmom is not None:
             ispin_value = self.incar_tags.get('ISPIN', None)
@@ -100,22 +117,66 @@ class StructureOptimization:
                     UserWarning
                 )
 
-        # Validate kspacing and periodicity
-        if self.kspacing is None:
-            # If kspacing is None, the KPOINTS file will not be written;
-            # check that the 'KSPACING' tag is provided in the INCAR tags.
-            if 'KSPACING' not in self.incar_tags:
-                raise ValueError("kspacing is None. Please provide 'KSPACING' in incar_tags to allow VASP to generate the k-points automatically.")
-            self.kpointstype = None  # Not used when no KPOINTS file is written.
+        # Validate k-point settings (mutual exclusivity between kspacing, kpoints, and INCAR KSPACING)
+        has_incar_kspacing = 'KSPACING' in self.incar_tags
+
+        if has_incar_kspacing:
+            if self.kspacing is not None or self.kpoints is not None:
+                raise ValueError(
+                    "Found 'KSPACING' in incar_tags. In this case, both `kspacing` and `kpoints` must be None."
+                )
+            # No KPOINTS file will be written; VASP will generate k-points from INCAR.
+            self.kpointstype = None
+
         else:
-            if self.periodicity is None:
-                # For non-periodic (gas-phase) calculations: only a single Gamma point is used.
-                self.kpointstype = kpointstype.lower()
-            else:
+            # No KSPACING tag in INCAR. The user must provide either kspacing or kpoints.
+            if self.kspacing is not None and self.kpoints is not None:
+                raise ValueError("`kspacing` and `kpoints` are mutually exclusive. Please provide only one of them.")
+
+            if self.kspacing is None and self.kpoints is None:
+                raise ValueError(
+                    "No k-point specification provided. Please provide either `kspacing`, `kpoints`, "
+                    "or include 'KSPACING' in incar_tags."
+                )
+
+            # Validate and normalize kpoints if provided
+            if self.kpoints is not None:
+                if not (isinstance(self.kpoints, (tuple, list)) and len(self.kpoints) == 3):
+                    raise ValueError("`kpoints` must be a tuple/list of three integers, e.g. (5, 5, 1).")
+                try:
+                    self.kpoints = tuple(int(x) for x in self.kpoints)
+                except Exception as exc:
+                    raise ValueError("`kpoints` must contain integers only.") from exc
+                if any(k <= 0 for k in self.kpoints):
+                    raise ValueError("`kpoints` must contain positive integers only.")
+
+            # Validate kspacing if provided
+            if self.kspacing is not None:
                 # For periodic calculations (2d or 3d), ensure kspacing is a float.
                 self.kspacing = float(self.kspacing)
-                self.kpointstype = kpointstype.lower()
 
+            # kpointstype is only relevant when a KPOINTS file is written
+            self.kpointstype = kpointstype.lower()
+
+        # Additional periodicity-related adjustments
+        if self.periodicity is None:
+            # For non-periodic (gas-phase) calculations, a single Gamma point will be used when writing KPOINTS.
+            # If the user provided an explicit mesh, it is ignored and replaced by (1, 1, 1).
+            if self.kpoints is not None and self.kpoints != (1, 1, 1):
+                warnings.warn(
+                    f"periodicity=None (gas-phase). Using a single Gamma point (1, 1, 1) instead of kpoints={self.kpoints}.",
+                    UserWarning
+                )
+                self.kpoints = (1, 1, 1)
+
+        elif self.periodicity == '2d':
+            # For 2D periodicity, force the number of k-points in the z-direction to 1.
+            if self.kpoints is not None and self.kpoints[2] != 1:
+                warnings.warn(
+                    f"periodicity='2d'. Forcing kpoints z-component to 1 (was {self.kpoints[2]}).",
+                    UserWarning
+                )
+                self.kpoints = (self.kpoints[0], self.kpoints[1], 1)
         if not isinstance(potcar_dict, dict):
             raise ValueError("potcar_dict must be a dictionary.")
         self.potcar_dict = potcar_dict
@@ -218,36 +279,44 @@ class StructureOptimization:
     def _write_kpoints(self, folder_name):
         """
         Write the KPOINTS file.
-
-        Steps:
-        1. If kspacing is None, do not write a KPOINTS file, but check that 'KSPACING'
-           is specified in the INCAR tags.
-        2. If periodicity is None (non-periodic: gas-phase), write a single Gamma point.
-        3. For periodic systems (2d or 3d), calculate the k-point mesh using the provided
-           kspacing and kspacing_definition.
-           For 2D periodicity, the z-direction is always set to 1.
         """
         kpoints_path = os.path.join(folder_name, "KPOINTS")
 
-        # Case 1: If kspacing is None.
-        if self.kspacing is None:
-            if "KSPACING" not in self.incar_tags:
-                raise ValueError("When kspacing is None, 'KSPACING' must be provided in incar_tags.")
+        # Case 1: Let VASP generate k-points from INCAR (no KPOINTS file written).
+        if self.kpointstype is None:
             return
 
-        # Case 2: If periodicity is None (non-periodic: gas-phase), use a single Gamma point.
+        # Case 2: Explicit k-point mesh provided by the user.
+        if self.kpoints is not None:
+            n1, n2, n3 = self.kpoints
+            kpts_style = "Gamma" if self.kpointstype == 'gamma' else "Monkhorst"
+            shift_line = "0 0 0" if self.kpointstype == 'gamma' else "0.5 0.5 0.5"
+            kpoints_content = f"""KPOINTS
+0
+{kpts_style}
+{n1} {n2} {n3}
+{shift_line}
+"""
+            with open(kpoints_path, "w") as f:
+                f.write(kpoints_content)
+            return
+
+        # Case 3: If periodicity is None (non-periodic: gas-phase) AND kspacing is used,
+        # write a single Gamma point.
         if self.periodicity is None:
             content = """Gamma-point only
- 0
+0
 Gamma
- 1 1 1
- 0 0 0
+1 1 1
+0 0 0
 """
             with open(kpoints_path, "w") as f:
                 f.write(content)
             return
+        # Case 4: Compute k-point mesh from kspacing (periodic systems: 2d or 3d).
+        if self.kspacing is None:
+            raise ValueError("Internal error: expected `kspacing` to be set when `kpoints` is None and `kpointstype` is not None.")
 
-        # Case 3: For periodic systems (2d or 3d), calculate the k-point mesh.
         cell = np.array(self.atoms.get_cell())
         volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
 
@@ -290,10 +359,8 @@ Gamma
         if self.periodicity == '2d':
             n3 = 1
 
-        # Determine the KPOINTS style and shift.
         kpts_style = "Gamma" if self.kpointstype == 'gamma' else "Monkhorst"
         shift_line = "0 0 0" if self.kpointstype == 'gamma' else "0.5 0.5 0.5"
-
         kpoints_content = f"""KPOINTS
 0
 {kpts_style}
