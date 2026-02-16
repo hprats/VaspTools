@@ -91,18 +91,14 @@ class StructureOptimization:
     ):
         self.atoms = atoms
         self.incar_tags = incar_tags
+        if isinstance(periodicity, str) and periodicity.strip().lower() in ("none", "gas", "gas-phase", "gasphase"):
+            periodicity = None
         self.periodicity = periodicity
         self.magmom = magmom
-
-        # Set the k-point generation options.
-        # Exactly one of the following three options must be used:
-        #   1) `kspacing` (write a KPOINTS file based on spacing)
-        #   2) `kpoints`  (write a KPOINTS file with an explicit mesh)
-        #   3) 'KSPACING' in `incar_tags` (let VASP generate k-points; do not write KPOINTS)
         self.kspacing = kspacing
         self.kpoints = kpoints
 
-                # `kspacing_definition` is only relevant when `kspacing` is used to generate the mesh.
+        # `kspacing_definition` is only relevant when `kspacing` is used to generate the mesh.
         # If `kspacing` is None (explicit `kpoints` or INCAR `KSPACING`), this flag is ignored.
         self.kspacing_definition = kspacing_definition.lower() if kspacing_definition is not None else None
         if self.kspacing is not None:
@@ -129,15 +125,19 @@ class StructureOptimization:
             self.kpointstype = None
 
         else:
-            # No KSPACING tag in INCAR. The user must provide either kspacing or kpoints.
-            if self.kspacing is not None and self.kpoints is not None:
-                raise ValueError("`kspacing` and `kpoints` are mutually exclusive. Please provide only one of them.")
+            if self.periodicity is None and self.kspacing is None and self.kpoints is None:
+                self.kpoints = (1, 1, 1)
+                self.kpointstype = 'gamma'
+            else:
+                # No KSPACING tag in INCAR. The user must provide either kspacing or kpoints.
+                if self.kspacing is not None and self.kpoints is not None:
+                    raise ValueError("`kspacing` and `kpoints` are mutually exclusive. Please provide only one of them.")
 
-            if self.kspacing is None and self.kpoints is None:
-                raise ValueError(
-                    "No k-point specification provided. Please provide either `kspacing`, `kpoints`, "
-                    "or include 'KSPACING' in incar_tags."
-                )
+                if self.kspacing is None and self.kpoints is None:
+                    raise ValueError(
+                        "No k-point specification provided. Please provide either `kspacing`, `kpoints`, "
+                        "or include 'KSPACING' in incar_tags."
+                    )
 
             # Validate and normalize kpoints if provided
             if self.kpoints is not None:
@@ -152,7 +152,6 @@ class StructureOptimization:
 
             # Validate kspacing if provided
             if self.kspacing is not None:
-                # For periodic calculations (2d or 3d), ensure kspacing is a float.
                 self.kspacing = float(self.kspacing)
 
             # kpointstype is only relevant when a KPOINTS file is written
